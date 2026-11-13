@@ -32,7 +32,7 @@
 ```bash
 # 从 GitHub Release 的 tgz 安装
 plugin_manager install_bundle \
-  target: https://github.com/<owner>/dsh-session-cleanup/releases/download/v1.2.0/dsh-session-cleanup-1.2.0.tgz
+  target: https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/releases/download/v1.2.0/dsh-session-cleanup-1.2.0.tgz
 ```
 
 或者从本地目录安装（开发时）：

@@ -5,6 +5,14 @@
   "type": "module",
   "keywords": ["dsh", "dsh-plugin", "session", "cleanup"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup.git"
+  },
+  "homepage": "https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup#readme",
+  "bugs": {
+    "url": "https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
