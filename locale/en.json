@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Session cleanup",
+    "description": "Lists the workspace's sessions, scans one conversation for the files it produced, and moves those artifacts into the workspace's \"手动删除\" folder.",
+    "detail": "docs/DETAIL.md"
+  }
+}

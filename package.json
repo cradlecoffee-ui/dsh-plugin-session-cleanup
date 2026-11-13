@@ -1,0 +1,34 @@
+{
+  "name": "dsh-session-cleanup",
+  "version": "1.2.0",
+  "description": "DSH plugin: retire sessions, archive them, and collect their artifacts into a 手动删除 folder.",
+  "type": "module",
+  "keywords": ["dsh", "dsh-plugin", "session", "cleanup"],
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}
