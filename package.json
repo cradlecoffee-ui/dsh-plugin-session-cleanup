@@ -1,42 +1,47 @@
-{
-  "name": "dsh-session-cleanup",
-  "version": "1.2.0",
-  "description": "DSH plugin: retire sessions, archive them, and collect their artifacts into a 手动删除 folder.",
-  "type": "module",
-  "keywords": ["dsh", "dsh-plugin", "session", "cleanup"],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup.git"
-  },
-  "homepage": "https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup#readme",
-  "bugs": {
-    "url": "https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/issues"
-  },
-  "exports": {
-    ".": "./index.js",
-    "./client": "./client.js",
-    "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
-  },
-  "files": [
-    "index.js",
-    "client.js",
-    "cordis.patch.yml",
-    "locale/*.json",
-    "docs",
-    "icon.svg"
-  ],
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "immediately": true,
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-conversation"
-      ]
-    }
-  }
+﻿{
+    "name":  "dsh-session-cleanup",
+    "version":  "1.6.0",
+    "description":  "DSH plugin: retire sessions, archive them, and collect their artifacts into a 鎵嬪姩鍒犻櫎 folder.",
+    "type":  "module",
+    "keywords":  [
+                     "dsh",
+                     "dsh-plugin",
+                     "session",
+                     "cleanup"
+                 ],
+    "license":  "MIT",
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup.git"
+                   },
+    "homepage":  "https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup#readme",
+    "bugs":  {
+                 "url":  "https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/issues"
+             },
+    "exports":  {
+                    ".":  "./index.js",
+                    "./client":  "./client.js",
+                    "./locale/*.json":  "./locale/*.json",
+                    "./icon":  "./icon.svg"
+                },
+    "files":  [
+                  "index.js",
+                  "client.js",
+                  "cordis.patch.yml",
+                  "locale/*.json",
+                  "docs",
+                  "icon.svg"
+              ],
+    "dsh":  {
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           },
+                "client":  {
+                               "platform":  "web",
+                               "immediately":  true,
+                               "inject":  [
+                                              "@deepseek-ai/dsh-client-ui-conversation"
+                                          ]
+                           }
+            }
 }

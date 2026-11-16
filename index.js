@@ -117,8 +117,11 @@ function labelDefault() {
 /* ---------------- 产物提取 ---------------- */
 const PATH_RE = /"file_path"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
 const EXT_RE = /"((?:[A-Za-z]:[\\/]|\/)[^"]{3,240}?\.(?:png|jpe?g|webp|gif|svg|mp4|webm|mov|mp3|wav|aep|aepx|jsx|html?|css|js|mjs|cjs|ts|tsx|json|md|py|ps1|cmd|docx?|xlsx?|pptx?|pdf|zip|txt))"/g;
+/* 工具输出里未加引号的绝对路径，例如 "Saved to C:\...\x.png" */
+const EXT_RAW = /([A-Za-z]:\\[^\s"'<>|*?\r\n]{3,240}?\.(?:png|jpe?g|webp|gif|svg|mp4|webm|mov|mp3|wav|aep|aepx|jsx|html?|css|js|mjs|cjs|ts|tsx|json|md|py|ps1|cmd|docx?|xlsx?|pptx?|pdf|zip|txt))(?=[\s"',;)\]}]|$)/g;
 
-function artifactsOf(session, cwd) {
+/** 日志里引用过、且落在工作区内的所有路径（不检查是否还存在） */
+function referencedPathsOf(session, cwd) {
   const text = decompressFrames(fs.readFileSync(session.file));
   const found = new Set();
   const add = (p) => {
@@ -127,38 +130,133 @@ function artifactsOf(session, cwd) {
   };
   for (const m of text.matchAll(PATH_RE)) add(m[1].replace(/\\\\/g, '\\'));
   for (const m of text.matchAll(EXT_RE)) add(m[1].replace(/\\\\/g, '\\'));
-  return [...found].filter((p) => {
+  for (const m of text.matchAll(EXT_RAW)) add(m[1]);
+  return [...found];
+}
+
+function artifactsOf(session, cwd) {
+  return referencedPathsOf(session, cwd).filter((p) => {
     try { return fs.statSync(p).isFile(); } catch { return false; }
   });
 }
 
-function moveInto(paths, cwd, tag) {
+/** 跨盘移动失败时的递归复制 */
+/** 跳过原因：日志写英文代码，界面显示中文 */
+const SKIP_TEXT = {
+  'outside-workspace': '工作区外，拒绝',
+  'realpath-outside-workspace': '真实路径在工作区外，拒绝',
+  'already-in-trash': '已在手动删除里',
+  'missing': '文件不存在',
+  'not-found': '文件不存在',
+  'not-a-file': '不是普通文件'
+};
+
+function fmtSkipList(list) {
+  return list.map((s) => s.path + '（' + (SKIP_TEXT[s.reason] || s.reason) + '）').join('\n');
+}
+
+function fmtSkipLog(list) {
+  return list.map((s) => s.path + ' [' + s.reason + ']').join(' | ');
+}
+
+function copyDirSync(from, to) {
+  fs.mkdirSync(to, { recursive: true });
+  for (const e of fs.readdirSync(from, { withFileTypes: true })) {
+    const src = path.join(from, e.name);
+    const dst = path.join(to, e.name);
+    if (e.isDirectory()) copyDirSync(src, dst);
+    else if (e.isSymbolicLink()) { try { fs.symlinkSync(fs.readlinkSync(src), dst); } catch { /* ignore */ } }
+    else fs.copyFileSync(src, dst);
+  }
+}
+
+function moveInto(paths, cwd, tag, dry) {
   const trashRoot = path.join(cwd, TRASH_DIR);
   const destRoot = path.join(trashRoot, tag || labelDefault());
   const moved = [];
   const skipped = [];
   if (!paths.length) return { moved, skipped, destRoot };
 
-  fs.mkdirSync(destRoot, { recursive: true });
+  let dirReady = false;
   for (const raw of paths) {
     const p = path.resolve(String(raw));
-    if (!insideCwd(p, cwd)) { skipped.push(p + '（工作区外）'); continue; }
-    if (insideCwd(p, trashRoot)) { skipped.push(p + '（已在手动删除里）'); continue; }
-    let st;
-    try { st = fs.statSync(p); } catch { skipped.push(p + '（不存在）'); continue; }
-    if (!st.isFile()) { skipped.push(p + '（非文件）'); continue; }
+    if (!insideCwd(p, cwd)) { skipped.push({ path: p, reason: 'outside-workspace' }); continue; }
+    if (insideCwd(p, trashRoot)) { skipped.push({ path: p, reason: 'already-in-trash' }); continue; }
 
-    let target = path.join(destRoot, path.basename(p));
+    // 用真实路径再判一次，防止符号链接把文件指到工作区外
+    let real;
+    try { real = fs.realpathSync(p); } catch { skipped.push({ path: p, reason: 'missing' }); continue; }
+    if (!insideCwd(real, cwd)) { skipped.push({ path: p, reason: 'realpath-outside-workspace' }); continue; }
+
+    let st;
+    try { st = fs.statSync(real); } catch { skipped.push({ path: p, reason: 'missing' }); continue; }
+
+    // 目录：整体移动
+    if (st.isDirectory()) {
+      if (dry) { moved.push('(预览) ' + path.join(destRoot, path.basename(real)) + '/'); continue; }
+      if (!dirReady) { fs.mkdirSync(destRoot, { recursive: true }); dirReady = true; }
+      let dirTarget = path.join(destRoot, path.basename(real));
+      let dn = 1;
+      while (fs.existsSync(dirTarget)) dirTarget = path.join(destRoot, path.basename(real) + '-' + (++dn));
+      try { fs.renameSync(real, dirTarget); }
+      catch (e) { copyDirSync(real, dirTarget); fs.rmSync(real, { recursive: true, force: true }); }
+      moved.push(dirTarget + '（整个文件夹）');
+      continue;
+    }
+
+    if (!st.isFile()) { skipped.push({ path: p, reason: 'not-a-file' }); continue; }
+
+    if (dry) { moved.push('(预览) ' + path.join(destRoot, path.basename(real))); continue; }
+
+    let target = path.join(destRoot, path.basename(real));
+    if (!dirReady) { fs.mkdirSync(destRoot, { recursive: true }); dirReady = true; }
     let n = 1;
     while (fs.existsSync(target)) {
-      const ext = path.extname(p);
-      target = path.join(destRoot, path.basename(p, ext) + '-' + (++n) + ext);
+      const ext = path.extname(real);
+      target = path.join(destRoot, path.basename(real, ext) + '-' + (++n) + ext);
     }
-    try { fs.renameSync(p, target); }
-    catch (e) { fs.copyFileSync(p, target); fs.unlinkSync(p); }
+    try { fs.renameSync(real, target); }
+    catch (e) { fs.copyFileSync(real, target); fs.unlinkSync(real); }
     moved.push(target);
   }
   return { moved, skipped, destRoot };
+}
+
+/** 该会话的边界工作区：显式指定 > 会话自己记录的工作区 > 无 */
+function boundaryOf(session, explicit) {
+  if (explicit && String(explicit).trim()) return path.resolve(String(explicit));
+  const c = session && session.header && session.header.cwd;
+  return c ? path.resolve(c) : null;
+}
+
+const RETIRED_PREFIX = '已停用';
+
+function shortIdOf(id) {
+  return String(id || '').replace(/^session-/, '').slice(0, 8);
+}
+
+/** 读取会话日志里最后一次标题 */
+function lastTitleOf(session) {
+  try {
+    const text = decompressFrames(fs.readFileSync(session.file));
+    let title = null;
+    for (const line of text.split('\n')) {
+      if (!line || line.indexOf('"session/title"') < 0) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === 'session/title' && ev.data && typeof ev.data.title === 'string') title = ev.data.title;
+      } catch { /* ignore */ }
+    }
+    return title;
+  } catch { return null; }
+}
+
+/** 每个会话一个文件夹；同名时追加短 id 区分 */
+function folderNameFor(session, titleCounts) {
+  const title = lastTitleOf(session);
+  const base = (title && title.trim() ? title.trim() : labelDefault()).replace(/[\\/:*?"<>|]/g, '_');
+  const dup = titleCounts && titleCounts[title] > 1;
+  return dup ? base + '-' + shortIdOf(session.header.id) : base;
 }
 
 /* ---------------- 工具动作 ---------------- */
@@ -181,58 +279,158 @@ function findSession(sessionId) {
   return hit;
 }
 
-function scanSession(sessionId, cwd) {
+function scanSession(sessionId, explicitCwd) {
   const s = findSession(sessionId);
-  const list = artifactsOf(s, cwd);
-  if (!list.length) return '会话 ' + sessionId + ' 里没有找到仍然存在的产物文件。';
-  return '会话 ' + sessionId + ' 相关文件（' + list.length + ' 个）：\n' + list.join('\n');
+  const boundary = boundaryOf(s, explicitCwd);
+  if (!boundary) throw new Error('该会话没有记录工作区，拒绝扫描');
+  const list = artifactsOf(s, boundary);
+  if (!list.length) return '会话 ' + sessionId + ' 里没有找到工作区内仍然存在的产物文件。\n（边界：' + boundary + '）';
+  return '会话 ' + sessionId + ' 工作区内相关文件（' + list.length + ' 个）：\n（边界：' + boundary + '）\n' + list.join('\n');
 }
 
-function collectSession(sessionId, cwd, tag) {
+function collectSession(sessionId, explicitCwd, tag) {
   const s = findSession(sessionId);
-  const list = artifactsOf(s, cwd);
-  const r = moveInto(list, cwd, tag);
-  const head = '已移动 ' + r.moved.length + ' 个文件到：' + r.destRoot;
-  const skip = r.skipped.length ? '\n\n跳过：\n' + r.skipped.join('\n') : '';
+  const boundary = boundaryOf(s, explicitCwd);
+  if (!boundary) throw new Error('该会话没有记录工作区，拒绝移动');
+  let folder = tag;
+  if (!folder) {
+    const counts = {};
+    for (const o of allSessions()) {
+      if (!o.header) continue;
+      const t = lastTitleOf(o);
+      if (t) counts[t] = (counts[t] || 0) + 1;
+    }
+    folder = folderNameFor(s, counts);
+  }
+  const list = artifactsOf(s, boundary);
+  const r = moveInto(list, boundary, folder);
+  const head = '已移动 ' + r.moved.length + ' 个文件到：' + r.destRoot + '\n（边界：' + boundary + '）';
+  const skip = r.skipped.length ? '\n\n跳过：\n' + fmtSkipList(r.skipped) : '';
   return head + (r.moved.length ? '\n\n' + r.moved.join('\n') : '') + skip;
 }
 
 /* ---------------- 归档后自动收产物 ---------------- */
 function autoCollectAfterArchive(sessionId) {
   try {
-    const cwd = resolveWorkspace(null);
     const s = findSession(sessionId);
-    const list = artifactsOf(s, cwd);
-    if (!list.length) { logLine('auto 0 files ' + sessionId); return; }
-    const r = moveInto(list, cwd, labelDefault());
-    logLine('auto moved ' + r.moved.length + '/' + list.length + ' ' + sessionId + ' → ' + r.destRoot);
+    // 边界必须来自该会话自己记录的工作区，绝不用全局默认值
+    const boundary = boundaryOf(s, null);
+    if (!boundary) { logLine('auto idle: no cwd for ' + sessionId); return; }
+
+    // 标题重名时把短 id 加进文件夹名，保证一个会话一个文件夹
+    const counts = {};
+    for (const other of allSessions()) {
+      if (!other.header) continue;
+      const t = lastTitleOf(other);
+      if (t) counts[t] = (counts[t] || 0) + 1;
+    }
+    const folder = folderNameFor(s, counts);
+
+    const list = artifactsOf(s, boundary);
+    if (!list.length) { logLine('auto idle: no files for ' + sessionId + ' folder=' + folder); return; }
+    const r = moveInto(list, boundary, folder);
+    logLine('auto moved ' + r.moved.length + '/' + list.length + ' -> ' + folder);
+    if (r.skipped.length) logLine('auto skip ' + r.skipped.length + ': ' + fmtSkipLog(r.skipped).slice(0, 500));
   } catch (e) {
-    logLine('auto failed ' + sessionId + ': ' + (e && e.message ? e.message : String(e)));
+    logLine('auto error: ' + sessionId + ': ' + (e && e.message ? e.message : String(e)));
   }
 }
 
+/* ---------------- 补收：把已停用会话的残留文件收干净 ---------------- */
+function sweepArchived(explicitCwd, dry) {
+  const archived = [];
+  for (const s of allSessions()) {
+    if (!s.header) continue;
+    const t = lastTitleOf(s);
+    if (t && t.indexOf(RETIRED_PREFIX) === 0) archived.push({ session: s, title: t });
+  }
+  if (!archived.length) return '没有找到已停用的会话。';
+
+  const counts = {};
+  for (const a of archived) counts[a.title] = (counts[a.title] || 0) + 1;
+  const folderOf = (a) => {
+    const base = a.title.replace(/[\\/:*?"<>|]/g, '_');
+    return counts[a.title] > 1 ? base + '-' + shortIdOf(a.session.header.id) : base;
+  };
+
+  const lines = [];
+  const baseOwner = new Map();   // 文件名小写 → 目标文件夹
+
+  // 1) 把工作区里仍然存在的产物收进各自文件夹
+  for (const a of archived) {
+    const boundary = boundaryOf(a.session, explicitCwd);
+    if (!boundary) { lines.push(a.title + '：无工作区，跳过'); continue; }
+    const folder = folderOf(a);
+    const refs = referencedPathsOf(a.session, boundary);
+    for (const p of refs) {
+      const key = path.basename(p).toLowerCase();
+      if (!baseOwner.has(key)) baseOwner.set(key, folder);
+    }
+    const list = refs.filter((p) => {
+      try { return fs.statSync(p).isFile(); } catch { return false; }
+    });
+    const r = moveInto(list, boundary, folder, dry);
+    if (r.moved.length) lines.push(folder + '：' + (dry ? '将收 ' : '新收 ') + r.moved.length + ' 个');
+  }
+
+  // 2) 整理已经在 手动删除 里的文件（按文件名归到各自会话文件夹）
+  const trashRoots = new Set();
+  for (const a of archived) {
+    const b = boundaryOf(a.session, explicitCwd);
+    if (b) trashRoots.add(path.join(b, TRASH_DIR));
+  }
+  let reorganized = 0;
+  for (const trash of trashRoots) {
+    if (!fs.existsSync(trash)) continue;
+    for (const sub of fs.readdirSync(trash, { withFileTypes: true })) {
+      if (!sub.isDirectory()) continue;
+      const dir = path.join(trash, sub.name);
+      for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!f.isFile()) continue;
+        const target = baseOwner.get(f.name.toLowerCase());
+        if (!target || target === sub.name) continue;
+        if (dry) { reorganized++; continue; }
+        const destDir = path.join(trash, target);
+        fs.mkdirSync(destDir, { recursive: true });
+        let dest = path.join(destDir, f.name);
+        let n = 1;
+        while (fs.existsSync(dest)) {
+          const ext = path.extname(f.name);
+          dest = path.join(destDir, path.basename(f.name, ext) + '-' + (++n) + ext);
+        }
+        try { fs.renameSync(path.join(dir, f.name), dest); reorganized++; } catch { /* ignore */ }
+      }
+      try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* ignore */ }
+    }
+  }
+  lines.push('整理已有归档：归位 ' + reorganized + ' 个文件');
+  logLine('sweep' + (dry ? ' (dry)' : '') + ': collected+reorganized, lines=' + lines.length);
+  return lines.join('\n');
+}
+
 function run(args) {
-  const cwd = resolveWorkspace(args.cwd);
   const action = String(args.action || '');
-  if (action === 'list') return listSessions(cwd);
+  if (action === 'list') return listSessions(resolveWorkspace(args.cwd));
   if (action === 'scan') {
     if (!args.session_id) throw new Error('scan 需要 session_id');
-    return scanSession(String(args.session_id), cwd);
+    return scanSession(String(args.session_id), args.cwd);
   }
-  if (action === 'move') return collectSessionFromPaths(args.paths, cwd, args.label);
+  if (action === 'move') return collectSessionFromPaths(args.paths, resolveWorkspace(args.cwd), args.label);
   if (action === 'collect') {
     if (!args.session_id) throw new Error('collect 需要 session_id');
-    return collectSession(String(args.session_id), cwd, args.label);
+    return collectSession(String(args.session_id), args.cwd, args.label);
   }
+  if (action === 'sweep') return sweepArchived(args.cwd, args.dry === true);
   throw new Error('未知 action：' + action);
 }
 
 function collectSessionFromPaths(paths, cwd, label) {
   if (!Array.isArray(paths) || !paths.length) throw new Error('没有指定要移动的文件');
   const r = moveInto(paths, cwd, label);
+  logLine('move ' + r.moved.length + '/' + paths.length + ' -> ' + r.destRoot + (r.skipped.length ? ' skip=' + r.skipped.length : ''));
   let out = '已移动 ' + r.moved.length + ' 个文件到：' + r.destRoot;
   if (r.moved.length) out += '\n\n' + r.moved.join('\n');
-  if (r.skipped.length) out += '\n\n跳过：\n' + r.skipped.join('\n');
+  if (r.skipped.length) out += '\n\n跳过：\n' + fmtSkipList(r.skipped);
   return out;
 }
 
@@ -243,11 +441,12 @@ export function apply(ctx) {
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'scan', 'move', 'collect'], description: 'list: 列出会话；scan: 扫描产物；move: 移动指定文件；collect: 扫描并移动整个会话的产物。' },
+        action: { type: 'string', enum: ['list', 'scan', 'move', 'collect', 'sweep'], description: 'list: 列出会话；scan: 扫描产物；move: 移动指定文件；collect: 扫描并移动整个会话的产物；sweep: 把所有已停用会话的残留产物收进各自的文件夹。' },
         session_id: { type: 'string', description: 'scan / collect 时必填：会话 id。' },
         paths: { type: 'array', items: { type: 'string' }, description: 'move 时必填：文件绝对路径列表。' },
         label: { type: 'string', description: '子文件夹名，默认 已停用 YYYYMMDD。' },
-        cwd: { type: 'string', description: '可选：目标工作区，默认取 workspace.json 的默认工作区。' }
+        cwd: { type: 'string', description: '可选：目标工作区，默认取 workspace.json 的默认工作区。' },
+        dry: { type: 'boolean', description: 'sweep 时可选：只预览不移动。' }
       },
       required: ['action']
     },

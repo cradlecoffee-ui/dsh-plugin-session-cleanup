@@ -2,43 +2,67 @@
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai)（DSH）用的插件：**停用历史会话，并把这场对话产生的文件收进工作区的 `手动删除` 文件夹。**
 
-侧边栏会越用越长，而真正占地方的往往不是聊天记录，是那些会话留下的产物文件。这个插件把「清理」拆成两步都可见的动作：先改名归档，再把产物集中到一处，等你自己确认后再删。
+侧边栏会越用越长，而真正占地方的往往不是聊天记录，是那些会话留下的产物文件。这个插件把「清理」拆成两步都可见的动作：先看报告、再改名归档、最后把产物集中到一处。
 
 > ⚠️ 它**不会删除任何数据**。归档只是从侧边栏隐藏，会话日志仍在磁盘上；产物只是移动，仍在 `手动删除` 里。
 
 ---
 
-## 它长什么样
+## 它怎么用
 
-输入框右下角有一个常驻的悬浮按钮：
+输入框右下角有一个常驻的悬浮按钮 **「⌫ 会话清理」**（可收起，开合状态会记住）。
+
+**点任意一个会话 → 弹出报告 → 阅读 → 输入「我确认停用」→ 执行。**
 
 ```
-                              ┌──────────────────────────────┐
-                              │ 会话清理        10 个（已停用 3）│
-                              │ ☐ HARNESS清理插件开发   [当前] │
-                              │ ☐ 能否控制 Blender 生成动画    │
-                              │ ☐ 本地部署 COMUI 与 MiniMaxH3  │
-                              │ [停用所选] [显示已停用] [刷新]  │
-                              └──────────────────────────────┘
-                                       ⌫ 会话清理 v1.2.0
+┌─ 会话报告 ──────────────────────────────┐
+│ 能否控制 Blender 生成动画          [返回] │
+│                                        │
+│ 开始      2026-11-14 00:36             │
+│ 最后活动  2026-11-14 01:35             │
+│ 消息      用户 5 条 / 助手 130 条 / 步骤 130 │
+│ 工具      144 次 · pwsh×86 · job_output×14 │
+│ 事件      1046 条                       │
+│                                        │
+│ 目的                        [全文回顾]   │
+│ 「你知道RUIC-2D 这个项目吗」              │
+│                                        │
+│ 工作区内的产物（14 个）                   │
+│ ...\ruic2d-check\cdp-check.mjs          │
+│      写入 7 次 · 首次 2026-11-07 22:31  │
+│ ...                                     │
+│                                        │
+│ 输入「我确认停用」以确认                  │
+│ [________________________]              │
+│ [确认停用] [取消]                        │
+└────────────────────────────────────────┘
 ```
 
-点「停用所选」会切到卡片内的确认视图，逐条列出改名结果和产物去向，再点一次才真正执行。
+### 报告里有什么
+
+| 字段 | 说明 |
+| --- | --- |
+| 开始 / 最后活动 | 第一次事件和最后一次事件的时间 |
+| 消息 | 只统计**真人输入**（排除系统注入的 runtime-context、skill-catalog、time-context） |
+| 工具 | 工具调用总次数与 Top 6 分布 |
+| 目的 | 你在这个会话里说的第一句话 |
+| 产物 | 工作区内被引用过的文件，带**写入次数**和首次写入时间 |
+
+### 全文回顾
+
+报告里点「全文回顾」，按时间顺序列出这场对话里**你说过的每一句话**和写过的文件。
+
+长会话里你多半已经忘了自己说过什么——这是最直接的唤醒方式，而且全是你自己的原话，不会被总结走样。
+
+点「复制全文」可以把整段复制出来，粘给任何 AI 做进一步摘要。
 
 ---
 
 ## 安装
 
 ```bash
-# 从 GitHub Release 的 tgz 安装
 plugin_manager install_bundle \
-  target: https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/releases/download/v1.2.0/dsh-session-cleanup-1.2.0.tgz
-```
-
-或者从本地目录安装（开发时）：
-
-```bash
-plugin_manager install_bundle target: /path/to/dsh-session-cleanup
+  target: https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/releases/download/v1.6.0/dsh-session-cleanup-1.6.0.tgz
 ```
 
 安装后**刷新页面**（客户端代码需要重新加载）。
@@ -47,17 +71,34 @@ plugin_manager install_bundle target: /path/to/dsh-session-cleanup
 
 ## 停用到底做了什么
 
-对每个被选中的会话，依次执行：
-
 | 步骤 | 动作 | 通过什么 |
 | --- | --- | --- |
 | 1 | 标题改成 `已停用 YYYYMMDD` | `session.rename` |
 | 2 | 从工作区导航移除 | `workspace.archiveSession`（会先停止运行中的任务） |
-| 3 | 产物移入 `工作区/手动删除/已停用 YYYYMMDD/` | 宿主监听 `workspace/session-archived` 事件后自动执行 |
+| 3 | 产物移入 `工作区/手动删除/<会话标题>/` | 宿主监听 `workspace/session-archived` 事件后自动执行 |
 
 第 3 步**不经过界面**——界面只负责调用官方接口，产物移动是宿主在事件触发后自己完成的。
 
-同一天停用多个时，第二个起自动加序号：`已停用 20261114-2`。
+**一个会话一个文件夹。** 同一天停用多个时，标题自动加序号（`已停用 20261114-2`），文件夹名跟标题一致。
+
+---
+
+## 边界：只碰会话自己的工作区
+
+这是本插件最重要的安全约束。
+
+- **边界来自会话日志里记录的工作区**，不是全局默认值
+- 移动前用 `realpathSync` 解析真实路径再判一次，防止符号链接把文件指到工作区外
+- `..` 目录穿越会被解析后拒绝
+- 工作区外的文件**一律不动**，报告里只显示「另有 N 个在工作区之外」
+
+实测拦截：
+
+```
+C:\Windows\System32\drivers\etc\hosts            → outside-workspace，拒绝
+C:\...\default-workspace\..\..\..\Windows\win.ini → 解析后 = C:\...\Windows\win.ini，拒绝
+D:\__outside__\x.png                             → 拒绝
+```
 
 ---
 
@@ -65,8 +106,8 @@ plugin_manager install_bundle target: /path/to/dsh-session-cleanup
 
 | 读 | 写 |
 | --- | --- |
-| `~/.dsh/sessions/**/session.v4.jsonl.zstd`（会话日志） | `<工作区>/手动删除/<标签>/`（移动产物） |
-| `~/.dsh/storages/workspace.json`（默认工作区路径） | `~/.dsh/session-cleanup.log`（运行日志） |
+| `~/.dsh/sessions/**/session.v4.jsonl.zstd`（会话日志） | `<工作区>/手动删除/<会话标题>/`（移动产物） |
+| `~/.dsh/storages/workspace.json`（默认工作区） | `~/.dsh/session-cleanup.log`（运行日志） |
 | 工作区内被引用过的文件 | 工作区内被引用过的文件（移动，不是删除） |
 
 **不读凭据、不联网、不碰工作区以外的文件。**
@@ -77,9 +118,10 @@ plugin_manager install_bundle target: /path/to/dsh-session-cleanup
 
 | 标记 | 含义 |
 | --- | --- |
-| **当前** | 你正在用的会话；复选框禁用，执行前还有二次拦截 |
+| **当前** | 你正在用的会话；不能点开，执行前还有二次拦截 |
 | **运行中** | 该会话此刻有任务在跑 |
-| **最近** | 3 分钟内有活动，确认视图会额外提醒 |
+| **最近** | 3 分钟内有活动，报告里会额外提醒 |
+| **空会话** | 只有头部、没有任何对话内容 |
 | 已停用 | 标题以 `已停用` 开头，默认隐藏；「显示已停用」可展开 |
 
 ---
@@ -87,23 +129,27 @@ plugin_manager install_bundle target: /path/to/dsh-session-cleanup
 ## 已知限制
 
 - **不能恢复**：插件不提供「取消归档」，归档后标题会一直是 `已停用 …`。
-- **产物按「这场对话引用过的路径」归属**：多个会话共同编辑过同一个文件时，会被**先停用的那场**带走。
-- **只移动文件，不移动目录**：空目录会留在工作区。
-- **产物必须仍存在**：日志里记过但后来被删掉的文件不会被移动。
-- **早期会话**可能因为日志里没有完整路径而扫不到产物。
+- **共享文件：谁先停用归谁**。多个会话都引用过同一个文件时，先停用的那场会把它带走。
+- **产物按「日志里引用过的路径」归属**。日志里没写过的文件（比如脚本内部生成、或别的工具直接写进工作区的）不会被找到。
+- **外部导入的文件无法自动归属**。实测：别的工具（如豆包）写进工作区的文件，DSH 日志里没有任何记录。这类文件请用工具的 `move` 动作手动收纳。
+- **产物必须仍存在**：日志里记过、但后来被删掉的文件会被跳过。
+- **日志分页上限 8000 条事件**。超大会话可能统计不全，报告会标注「已截断」。
 
 ---
 
 ## 附带的工具
 
-宿主注册了一个工具 `session_cleanup`，可用于排查或手动补做：
+宿主注册了工具 `session_cleanup`：
 
 | action | 作用 |
 | --- | --- |
 | `list` | 列出工作区会话（id、时间、日志大小） |
 | `scan` | 只读：列出某会话引用过的现存文件 |
 | `collect` | 扫描并移动某个会话的全部产物 |
-| `move` | 移动指定的文件列表 |
+| `move` | 移动指定路径（**支持整个文件夹**） |
+| `sweep` | 把所有已停用会话的残留产物收进各自的文件夹；加 `dry: true` 只预览 |
+
+`sweep` 还会把已经混在一起的历史归档按文件名重新归位到对应会话的文件夹。
 
 ---
 
@@ -113,16 +159,21 @@ plugin_manager install_bundle target: /path/to/dsh-session-cleanup
 cat ~/.dsh/session-cleanup.log
 ```
 
-正常情况下会看到：
+日志全英文，正常情况：
 
 ```
 listener registered
 event workspace/session-archived {"sessionId":"session-..."}
-auto moved 11/11 session-...
+auto moved 11/11 -> 已停用 20261117-2
+auto skip 2: C:\...\x.txt [outside-workspace] | C:\...\y.png [missing]
+sweep: collected+reorganized, lines=2
+move 1/1 -> ...\手动删除\未归属上传
 ```
 
+跳过原因代码：`outside-workspace`、`realpath-outside-workspace`、`already-in-trash`、`missing`、`not-a-file`。
+
 - 只有 `listener registered`、没有 `event` → 事件没触发（检查 DSH 版本）
-- 有 `event` 但没有 `auto moved` → 产物提取失败，先跑 `session_cleanup scan` 看能否扫到文件
+- 有 `event` 但没有 `auto moved` → 产物提取失败，先跑 `session_cleanup scan`
 
 ---
 
