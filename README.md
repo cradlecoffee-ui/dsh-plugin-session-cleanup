@@ -1,4 +1,4 @@
-# dsh-session-cleanup
+﻿# dsh-session-cleanup
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai)（DSH）用的插件：**停用历史会话，并把这场对话产生的文件收进工作区的 `手动删除` 文件夹。**
 
@@ -62,7 +62,7 @@
 
 ```bash
 plugin_manager install_bundle \
-  target: https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/releases/download/v1.6.0/dsh-session-cleanup-1.6.0.tgz
+  target: https://github.com/cradlecoffee-ui/dsh-plugin-session-cleanup/releases/download/v1.6.1/dsh-session-cleanup-1.6.0.tgz
 ```
 
 安装后**刷新页面**（客户端代码需要重新加载）。
