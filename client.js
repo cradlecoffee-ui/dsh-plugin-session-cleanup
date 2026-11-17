@@ -12,7 +12,7 @@ window.__ModuleLoader__.load({
 
     const PREFIX = '已停用 ';
     const LS_OPEN = 'session-cleanup:open';
-    const VERSION = 'v1.5.0';
+    const VERSION = 'v1.6.1';
     const CONFIRM_WORD = '我确认停用';
     const MAX_EVENTS = 8000;
     const PAGE_SIZE = 200;

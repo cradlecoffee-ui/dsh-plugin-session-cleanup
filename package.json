@@ -1,6 +1,6 @@
 ﻿{
     "name":  "dsh-session-cleanup",
-    "version":  "1.6.0",
+    "version":  "1.6.1",
     "description":  "DSH plugin: retire sessions, archive them, and collect their artifacts into a 鎵嬪姩鍒犻櫎 folder.",
     "type":  "module",
     "keywords":  [
